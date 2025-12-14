@@ -1,12 +1,15 @@
-# PyTorch2LTspice
+# pytorch2ltspice
 
-**PyTorch2LTspice** converts PyTorch neural network models into LTspice-compatible subcircuits (`.subckt`).  
+[![PyPI](https://img.shields.io/pypi/v/pytorch2ltspice.svg)](https://pypi.org/project/pytorch2ltspice/)
+[![License](https://img.shields.io/github/license/kosokno/pytorch2ltspice.svg)](./LICENSE)
+[![Python](https://img.shields.io/pypi/pyversions/pytorch2ltspice.svg)](https://pypi.org/project/pytorch2ltspice/)
+
+**pytorch2ltspice** converts PyTorch neural network models into LTspice-compatible subcircuits (`.subckt`).
 By combining it with [LTspicePowerSim](https://github.com/kosokno/LTspicePowerSim), users can implement AI-based controllers directly in power electronics circuits such as DC-DC converters, inverters, and motor drivers.  
+This repository also provides example code where a neural network controls the PWM of a BUCK regulator, trained with behavior imitation and PPO.
 
-This repository also provides example code where **a neural network controls the PWM of a BUCK regulator, trained with behavior imitation and PPO**.
 
-
-![Overview](./img/PyTorch2LTspice.png)
+![Overview](./img/pytorch2ltspice.png)
 
 ---
 
@@ -47,15 +50,25 @@ This allows for:
 
 ---
 
-## ✨ Training Example
+## 🚀 Installation
 
-### NN Controlled Voltage Mode Buck (WIP)
-![Overview](./img/NN_BUCK_VM.png)
+### Option A: Install from PyPI (recommended)
 
+```bash
+pip install pytorch2ltspice
+```
+
+### Option B: Install from source (GitHub)
+
+```bash
+git clone https://github.com/kosokno/pytorch2ltspice.git
+cd pytorch2ltspice
+pip install -e .
+```
 
 ---
 
-## 🚀 How to Use
+## ⚡ Quick Start
 
 ### 1. Define a model in PyTorch
 
@@ -75,7 +88,7 @@ model.eval()
 ### 2. Export as LTspice `.subckt` file
 
 ```python
-from PyTorch2LTspice import export_model_to_ltspice
+from pytorch2ltspice import export_model_to_ltspice
 
 export_model_to_ltspice(
     model,
@@ -83,6 +96,11 @@ export_model_to_ltspice(
     subckt_name="TESTACTORSUBCKT"
 )
 ```
+### 3. Include it in LTspice
+
+- Add the following directive in LTspice:
+  - `.include TEST_MODEL_SUBCKT.SP`
+- Wire `NNIN*` pins to your signals and read `NNOUT*` as the inference output.
 
 ---
 
@@ -102,21 +120,14 @@ B_OUT NNOUT1 0 V=V(L_ACT2_1)
 .ENDS TESTACTORSUBCKT
 ```
 
-You can include it in your LTspice schematic with `.INCLUDE TEST_MODEL_SUBCKT.SP`, and wire it to your simulated environment.
-
 ---
 
-## 📎 Dependencies
+## ✨ Training Example
 
-- Python 3.7+
-- PyTorch
-- NumPy
+### NN Controlled Voltage Mode Buck
+![Overview](./img/NN_BUCK_VM.png)
 
-Install with:
 
-```bash
-pip install torch numpy
-```
 
 ---
 
