@@ -1,5 +1,5 @@
 ﻿"""
-PyTorch2LTspice
+pytorch2ltspice
 ===============
 
 Utility to convert PyTorch nn.Sequential models (Linear, Activations, RNNCell/GRUCell/LSTMCell)
@@ -25,6 +25,10 @@ Change Log:
   - Auto ports: inputs use NNIN* (+ CLK if any Cell exists; Cell states are internal).
   - Outputs: NNOUT*; Cell state nets are internal only.
 - Activation: Added TANH handling.
+
+2025-12-14:
+- Changed module name from "Pytorch2LTspice" to "pytorch2ltspice"
+
 
 Notes:
 - No default input voltage sources are emitted.
