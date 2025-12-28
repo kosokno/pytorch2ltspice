@@ -1,14 +1,15 @@
 Version 4
 SymbolType BLOCK
-RECTANGLE Normal -64 -24 64 24
+LINE Normal -16 0 -32 -15
+LINE Normal -16 0 -32 15
+LINE Normal -40 7 -32 0
+LINE Normal -40 -7 -32 0
+RECTANGLE Normal -32 -24 32 24
+TEXT -15 0 Left 2 SG
 WINDOW 0 0 -24 Bottom 2
-WINDOW 3 0 24 Top 2
-SYMATTR Prefix X
-SYMATTR Value sig_gen
-SYMATTR ModelFile sig_gen.sp
-PIN -64 0 LEFT 8
+PIN -32 0 NONE 8
 PINATTR PinName clk
 PINATTR SpiceOrder 1
-PIN 64 0 RIGHT 8
+PIN 32 0 NONE 8
 PINATTR PinName out
 PINATTR SpiceOrder 2
