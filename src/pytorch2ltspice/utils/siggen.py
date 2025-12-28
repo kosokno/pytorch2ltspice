@@ -1,13 +1,32 @@
+"""
+pytorch2ltspice.utils.siggen
+===========================
+
+Signal generator helper for LTspice .asc/.asy outputs.
+
+Generates a minimal schematic that embeds a subcircuit with a table-driven source.
+This is useful for replaying fixed numeric sequences in LTspice without external files.
+
+Author: github.com/kosokno
+License: MIT
+
+Change Log:
+2025-12-29:
+- Initial release.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Optional, Sequence
+from typing import Optional, Sequence
 
 
 _DEFAULT_ASY = """Version 4
 SymbolType BLOCK
-LINE Normal -16 0 -32 -14
-LINE Normal -16 0 -32 14
+LINE Normal -16 0 -32 -15
+LINE Normal -16 0 -32 15
+LINE Normal -40 7 -32 0
+LINE Normal -40 -7 -32 0
 RECTANGLE Normal -32 -24 32 24
 TEXT -15 0 Left 2 SG
 WINDOW 0 0 -24 Bottom 2
@@ -20,22 +39,21 @@ PINATTR SpiceOrder 2
 """
 
 
-def _build_siggen_subckt_text(signals: Sequence[float]) -> str:
+def _build_siggen_subckt_text(signals: Sequence[float], subckt_name: str) -> str:
     """
-    Build the LTspice directive text that contains the whole sig_gen subckt.
-    Returned string is MULTI-LINE (with '\n'), caller should escape it as '\\n'
-    for embedding into .asc TEXT line.
+    Build the LTspice subcircuit text for a table-driven signal generator.
     """
     n = len(signals)
     if n <= 0:
         raise ValueError("signals must be non-empty.")
+    if not subckt_name:
+        raise ValueError("subckt_name must be non-empty.")
 
     lines: list[str] = []
-    lines.append("* Auto Generated SigGen subcircuit")
-    lines.append(".SUBCKT sig_gen clk out")
-    lines.append("XX1 N001 const")
-    lines.append("XX2 N001 cnt N002 sum")
-    lines.append("XX3 clk N002 cnt sg_samplehold")
+    lines.append(f".SUBCKT {subckt_name} clk out")
+    lines.append("XX1 N001 r2l_const")
+    lines.append("XX2 N001 cnt N002 r2l_sum")
+    lines.append("XX3 clk N002 cnt r2l_samplehold")
 
     # table(V(cnt), 0,0.0, 1,v1, 2,v2, ...)
     table_args = ["0,0.0"]
@@ -46,18 +64,18 @@ def _build_siggen_subckt_text(signals: Sequence[float]) -> str:
     # blocks
     lines += [
         "*--- const subcircuit: outputs DC K on its single pin ---",
-        ".SUBCKT const K",
+        ".SUBCKT r2l_const K",
         "V1 K 0 {K}",
         ".PARAM K=1",
-        ".ENDS const",
+        ".ENDS r2l_const",
         "",
         "*--- sum subcircuit: adds two inputs ---",
-        ".SUBCKT sum in1 in2 out",
+        ".SUBCKT r2l_sum in1 in2 out",
         "B1 OUT 0 V=V(IN1)+V(IN2)",
-        ".ENDS sum",
+        ".ENDS r2l_sum",
         "",
         "*--- samplehold subcircuit: latch on rising clk ---",
-        ".SUBCKT sg_samplehold CLK IN OUT",
+        ".SUBCKT r2l_samplehold CLK IN OUT",
         "R1 o 0 1k",
         "B1 OUT 0 V=V(o)",
         ".machine",
@@ -69,17 +87,11 @@ def _build_siggen_subckt_text(signals: Sequence[float]) -> str:
         ".rule * LO V(CLK)<.5",
         ".output (o) IF((state==1),V(in),V(out))",
         ".endmachine",
-        ".ENDS sg_samplehold",
+        ".ENDS r2l_samplehold",
         "",
     ]
 
-    # (optional) export params d1..dN (your original function did this)
-    lines += [f".param d{i}={signals[i-1]:.6f}" for i in range(1, n + 1)]
-
-    lines.append(".ENDS SigGen")
-    lines.append("")
-    lines.append(".backanno")
-    lines.append(".end")
+    lines.append(f".ENDS {subckt_name}")
 
     return "\n".join(lines)
 
@@ -94,13 +106,11 @@ def generate_siggen_asc_asy(
 ) -> tuple[Path, Optional[Path]]:
     """
     Generate:
-      - .asc: a minimal schematic that instantiates X1 <subckt_name> clk out
+      - .asc: a minimal schematic that instantiates X1 clk out <subckt_name>
               and embeds the whole .SUBCKT body as a TEXT directive.
       - .asy: (optional) a 2-pin block symbol (clk, out)
 
     Notes:
-      - The generated .asc matches the style of your uploaded sig_gen.asc:
-          Version/SHEET/WIRE/FLAG/IOPIN + TEXT for X1 + TEXT for subckt body
       - asy_path defaults to <asc_path>.with_suffix(".asy") if gen_symbol=True
     """
     asc_path = Path(asc_path)
@@ -108,8 +118,9 @@ def generate_siggen_asc_asy(
         asy_path = asc_path.with_suffix(".asy")
     asy_path = Path(asy_path) if asy_path is not None else None
 
-    # Build embedded subckt text (multi-line) then escape for .asc TEXT line
-    subckt_text = _build_siggen_subckt_text(signals)
+    # Build embedded subckt text (multi-line) then escape for .asc TEXT line.
+    # LTspice renders "\n" sequences in TEXT directives as line breaks.
+    subckt_text = _build_siggen_subckt_text(signals, subckt_name=subckt_name)
     subckt_text_escaped = subckt_text.replace("\n", "\\n")
 
     # Minimal .asc (coordinates taken from your sample)
@@ -123,7 +134,7 @@ def generate_siggen_asc_asy(
         "IOPIN 112 224 In",
         "FLAG 368 224 out",
         "IOPIN 368 224 Out",
-        f"TEXT 48 144 Left 2 !X1 {subckt_name} clk out",
+        f"TEXT 48 144 Left 2 !X1 clk out {subckt_name}",
         f"TEXT 40 272 Left 2 !{subckt_text_escaped}",
         "",
     ]
