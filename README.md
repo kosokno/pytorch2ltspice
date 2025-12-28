@@ -31,6 +31,7 @@ This repository also provides example code where a neural network controls the P
 - Recurrent cells are implemented with `.machine` blocks (LO/LATCH/HI states, CLK pin auto-added)
 - Auto-generates LTspice node names (`NNIN1`, `NNIN2`, ..., `NNOUT1`, ...)
 - Easy integration into LTspice testbenches
+- Utilities for signal generation, model scaffolding, and sampling (`siggen`, `modelgen`, `sampling`)
 - Several example models are included:
   - MLP: `Linear → ReLU → Linear → ReLU → Linear → Sigmoid`
   - GRUCell: `GRUCell → Linear → Tanh`
@@ -101,6 +102,18 @@ export_model_to_ltspice(
 - Add the following directive in LTspice:
   - `.include TEST_MODEL_SUBCKT.SP`
 - Wire `NNIN*` pins to your signals and read `NNOUT*` as the inference output.
+
+---
+
+## 🧰 Utilities
+
+Helper utilities are available under `pytorch2ltspice.utils`:
+
+- `siggen`: signal generators for LTspice testbenches
+- `modelgen`: minimal model scaffolding for experiments
+- `sampling`: simple data sampling helpers
+
+Note: example code now uses these utilities. Developer tools moved from `tools/modelgen` to `tools/utils_test`.
 
 ---
 
