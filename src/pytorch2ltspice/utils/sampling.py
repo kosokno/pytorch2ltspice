@@ -1,5 +1,16 @@
-# clock_sampling.py
-# Utilities for sampling LTspice waveforms on clock edges.
+"""
+pytorch2ltspice.utils.sampling
+==============================
+
+Utilities for sampling LTspice waveforms on clock edges.
+
+Author: github.com/kosokno
+License: MIT
+
+Change Log:
+2025-12-29:
+- Initial release.
+"""
 
 from __future__ import annotations
 
@@ -19,20 +30,13 @@ def sample_on_clock(
     """
     Sample (latch) dataframe rows at specified clock edges.
 
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        LTspice transient result dataframe.
-    clk : str
-        Column name of the clock signal (e.g., 'V(ctrlclk)').
-    threshold : float
-        Threshold voltage for edge detection.
-    latch_edge : {'falling', 'rising', 'both'}
-        Which edge(s) to latch.
+    Args:
+        df: LTspice transient result dataframe.
+        clk: Column name of the clock signal (e.g., "V(ctrlclk)").
+        threshold: Threshold voltage for edge detection.
+        latch_edge: Which edge(s) to latch ("falling", "rising", "both").
 
-    Returns
-    -------
-    pandas.DataFrame
+    Returns:
         Rows latched at specified edges, index reset.
     """
     if latch_edge not in ("falling", "rising", "both"):

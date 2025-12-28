@@ -42,6 +42,13 @@ PINATTR SpiceOrder 2
 def _build_siggen_subckt_text(signals: Sequence[float], subckt_name: str) -> str:
     """
     Build the LTspice subcircuit text for a table-driven signal generator.
+
+    Args:
+        signals: Output sequence values for table(V(cnt), ...).
+        subckt_name: Name of the generated subcircuit.
+
+    Returns:
+        Multi-line .SUBCKT definition text.
     """
     n = len(signals)
     if n <= 0:
@@ -110,8 +117,15 @@ def generate_siggen_asc_asy(
               and embeds the whole .SUBCKT body as a TEXT directive.
       - .asy: (optional) a 2-pin block symbol (clk, out)
 
-    Notes:
-      - asy_path defaults to <asc_path>.with_suffix(".asy") if gen_symbol=True
+    Args:
+        signals: Output sequence values for the table source.
+        asc_path: Output .asc path.
+        asy_path: Output .asy path; defaults to asc_path with ".asy".
+        gen_symbol: Whether to emit the .asy symbol.
+        subckt_name: Subcircuit name used in the schematic and embedded text.
+
+    Returns:
+        Tuple of written .asc path and optional .asy path.
     """
     asc_path = Path(asc_path)
     if gen_symbol and asy_path is None:

@@ -1,4 +1,17 @@
-# utils/modelgen.py
+"""
+pytorch2ltspice.utils.modelgen
+==============================
+
+Generate a PyTorch nn.Module class from nn.Sequential and load it.
+
+Author: github.com/kosokno
+License: MIT
+
+Change Log:
+2025-12-29:
+- Initial release.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -7,7 +20,7 @@ import importlib.util
 import sys
 import textwrap
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -16,7 +29,7 @@ __all__ = ["build_model_from_sequential"]
 
 
 # ---- Internal: supported layer whitelist ----
-_SUPPORTED_LAYERS: Dict[type, str] = {
+_SUPPORTED_LAYERS: dict[type, str] = {
     nn.Linear: "nn.Linear",
     nn.ReLU: "nn.ReLU",
     nn.Sigmoid: "nn.Sigmoid",
@@ -71,12 +84,12 @@ def _layer_to_ctor_line(layer: nn.Module, idx: int) -> str:
     raise TypeError(f"Unsupported layer for code generation: {type(layer)}")
 
 
-def _generate_model_code_from_sequential(name: str, seq: nn.Sequential) -> Tuple[str, str]:
+def _generate_model_code_from_sequential(name: str, seq: nn.Sequential) -> tuple[str, str]:
     class_name = _sanitize_class_name(name)
 
-    ctor_lines: List[str] = []
-    model_lines: List[str] = ["                self.model = nn.Sequential("]
-    cell_indices: List[int] = []
+    ctor_lines: list[str] = []
+    model_lines: list[str] = ["                self.model = nn.Sequential("]
+    cell_indices: list[int] = []
 
     for idx, layer in enumerate(seq):
         if type(layer) not in _SUPPORTED_LAYERS:
