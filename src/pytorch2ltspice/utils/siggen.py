@@ -13,6 +13,8 @@ License: MIT
 Change Log:
 2025-12-29:
 - Initial release.
+2026-01-03:
+- Added subckt name label to generated .asy symbols.
 """
 
 from __future__ import annotations
