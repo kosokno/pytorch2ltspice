@@ -29,6 +29,7 @@ LINE Normal -40 7 -32 0
 LINE Normal -40 -7 -32 0
 RECTANGLE Normal -32 -24 32 24
 TEXT -15 0 Left 2 SG
+TEXT 0 24 Top 0 {subckt_name}
 WINDOW 0 0 -24 Bottom 2
 PIN -32 0 NONE 8
 PINATTR PinName clk
@@ -160,7 +161,7 @@ def generate_siggen_asc_asy(
     if gen_symbol:
         assert asy_path is not None
         asy_path.parent.mkdir(parents=True, exist_ok=True)
-        asy_path.write_text(_DEFAULT_ASY, encoding="utf-8")
+        asy_path.write_text(_DEFAULT_ASY.format(subckt_name=subckt_name), encoding="utf-8")
         written_asy = asy_path
 
     return asc_path, written_asy
