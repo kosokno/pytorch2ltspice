@@ -9,7 +9,7 @@ By combining it with [LTspicePowerSim](https://github.com/kosokno/LTspicePowerSi
 This repository also provides example code where a neural network controls the PWM of a BUCK regulator, trained with behavior imitation and PPO.
 
 
-![Overview](./img/pytorch2ltspice.png)
+![overview](https://raw.githubusercontent.com/kosokno/pytorch2ltspice/main/img/pytorch2ltspice.png)
 
 ---
 
@@ -138,7 +138,7 @@ B_OUT NNOUT1 0 V=V(L_ACT2_1)
 ## ✨ Training Example
 
 ### NN Controlled Voltage Mode Buck
-![Overview](./img/NN_BUCK_VM.png)
+![Voltage Mode Buck controled with Nerural Network](https://raw.githubusercontent.com/kosokno/pytorch2ltspice/main/img/NN_BUCK_VM.png)
 
 
 
