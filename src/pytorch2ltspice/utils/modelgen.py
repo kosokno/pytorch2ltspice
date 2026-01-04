@@ -10,6 +10,9 @@ License: MIT
 Change Log:
 2025-12-29:
 - Initial release.
+
+2026-01-04:
+- Added output_activation support in build_model_from_sequential.
 """
 
 from __future__ import annotations
@@ -112,12 +115,18 @@ def _generate_model_code_from_sequential(name: str, seq: nn.Sequential) -> tuple
         from typing import Any, List, Optional
 
         class {class_name}(nn.Module):
-            def __init__(self):
+            default_output_activation: Optional[List[str]] = None
+
+            def __init__(self, output_activation: Optional[List[str]] = None):
                 super().__init__()
 {ctor_block}
 {model_block}
                 self._cells = [{cell_idx_literal}]
                 self._num_layers = {len(seq)}
+                if output_activation is None:
+                    self.output_activation = self.default_output_activation
+                else:
+                    self.output_activation = output_activation
 
             def _prepare_state_list(self, state: Optional[List[Any]]) -> List[Any]:
                 if not self._cells:
@@ -144,6 +153,42 @@ def _generate_model_code_from_sequential(name: str, seq: nn.Sequential) -> tuple
                     raise TypeError(f"Unsupported state element type: {{type(item)}}")
 
                 return _clone(state)
+
+            def _apply_output_activation(self, y: torch.Tensor) -> torch.Tensor:
+                acts = self.output_activation
+                if not acts:
+                    return y
+                if y.shape[-1] != len(acts):
+                    raise ValueError(
+                        f"Expected {{len(acts)}} output activations, got {{y.shape[-1]}} outputs."
+                    )
+                parts = torch.unbind(y, dim=-1)
+                out_parts: List[torch.Tensor] = []
+                for part, spec in zip(parts, acts):
+                    if spec is None:
+                        out_parts.append(part)
+                        continue
+                    spec_str = str(spec).strip().lower()
+                    if spec_str in ("", "identity"):
+                        out = part
+                    elif spec_str == "sigmoid":
+                        out = torch.sigmoid(part)
+                    elif spec_str == "tanh":
+                        out = torch.tanh(part)
+                    elif spec_str == "relu":
+                        out = torch.relu(part)
+                    elif spec_str.startswith("clamp(") and spec_str.endswith(")"):
+                        inner = spec_str[len("clamp("):-1].strip()
+                        pieces = [p.strip() for p in inner.split(",")]
+                        if len(pieces) != 2:
+                            raise ValueError("clamp expects clamp(min,max).")
+                        min_v = float(pieces[0])
+                        max_v = float(pieces[1])
+                        out = torch.clamp(part, min=min_v, max=max_v)
+                    else:
+                        raise ValueError(f"Unknown output activation: {{spec}}")
+                    out_parts.append(out)
+                return torch.stack(out_parts, dim=-1)
 
             def step(self, x: torch.Tensor, state: Optional[List[Any]]):
                 # x: (B, D)
@@ -183,7 +228,8 @@ def _generate_model_code_from_sequential(name: str, seq: nn.Sequential) -> tuple
                     else:
                         current = layer(current)
 
-                return current, next_states if self._cells else None
+                out = self._apply_output_activation(current)
+                return out, next_states if self._cells else None
 
             def forward(self, x: torch.Tensor, state: Optional[List[Any]] = None, h: Optional[List[Any]] = None):
                 # Compatibility alias: h == state
@@ -195,19 +241,22 @@ def _generate_model_code_from_sequential(name: str, seq: nn.Sequential) -> tuple
                 # MLP-only path
                 if not self._cells:
                     if x.dim() == 1:
-                        return self.model(x.unsqueeze(0)).squeeze(0)
+                        y = self.model(x.unsqueeze(0)).squeeze(0)
+                        return self._apply_output_activation(y)
                     if x.dim() == 2:
-                        return self.model(x)
+                        y = self.model(x)
+                        return self._apply_output_activation(y)
                     if x.dim() == 3:
                         b, t, f = x.shape
                         y = self.model(x.reshape(b * t, f))
-                        return y.reshape(b, t, -1)
+                        y = y.reshape(b, t, -1)
+                        return self._apply_output_activation(y)
                     raise ValueError("MLP forward expects tensors with rank 1, 2, or 3.")
 
                 # RNN path
                 if x.dim() == 1:
                     out, _ = self.step(x.unsqueeze(0), state)
-                    return out.squeeze(0)
+                    return self._apply_output_activation(out.squeeze(0))
 
                 # (T, D): step over T, batch=1
                 if x.dim() == 2:
@@ -217,7 +266,8 @@ def _generate_model_code_from_sequential(name: str, seq: nn.Sequential) -> tuple
                         step_input = x[t].unsqueeze(0)
                         out, state_in = self.step(step_input, state_in)
                         outputs.append(out)
-                    return torch.cat(outputs, dim=0)
+                    y = torch.cat(outputs, dim=0)
+                    return self._apply_output_activation(y)
 
                 # (B, T, D)
                 if x.dim() == 3:
@@ -227,7 +277,8 @@ def _generate_model_code_from_sequential(name: str, seq: nn.Sequential) -> tuple
                         step_input = x[:, t, :]
                         out, state_in = self.step(step_input, state_in)
                         outputs.append(out.unsqueeze(1))
-                    return torch.cat(outputs, dim=1)
+                    y = torch.cat(outputs, dim=1)
+                    return self._apply_output_activation(y)
 
                 raise ValueError("RNN forward expects tensors with rank 1, 2, or 3.")
         """
@@ -247,8 +298,16 @@ def _import_or_reload(py_path: Path, class_name: str, module_name: str):
     importlib.invalidate_caches()
 
     if module_name in sys.modules:
-        module = importlib.reload(sys.modules[module_name])
+        try:
+            module = importlib.reload(sys.modules[module_name])
+        except ModuleNotFoundError:
+            # Reload can fail if the module lost its spec; re-import from file.
+            sys.modules.pop(module_name, None)
+            module = None
     else:
+        module = None
+
+    if module is None:
         spec = importlib.util.spec_from_file_location(module_name, str(py_path))
         if spec is None or spec.loader is None:
             raise ImportError(f"Failed to create module spec from: {py_path}")
@@ -269,6 +328,7 @@ def build_model_from_sequential(
     *,
     out_py_name: Optional[str] = None,
     unique_module_name: bool = True,
+    output_activation: Optional[list[str]] = None,
 ):
     """
     Public API (utils): Build a model class from nn.Sequential.
@@ -284,6 +344,10 @@ def build_model_from_sequential(
         out_dir: Output directory for the generated .py.
         out_py_name: File stem for the generated .py (without ".py"). Default: class_name lowercased.
         unique_module_name: If True, use a unique module name (avoids sys.modules collision).
+        output_activation: Optional list of per-output activation specs (identity, sigmoid, tanh, relu, clamp(min,max)).
+          None is allowed to disable output activation (default).
+          If provided, it becomes the generated class's default_output_activation and can be overridden when instantiating.
+          Example: output_activation=["tanh", None, "clamp(-1,1)"]
 
     Returns:
         The generated class (type), e.g., GeneratedActor.
@@ -300,4 +364,7 @@ def build_model_from_sequential(
     else:
         module_name = stem
 
-    return _import_or_reload(py_path, class_name, module_name)
+    generated_class = _import_or_reload(py_path, class_name, module_name)
+    if output_activation is not None:
+        generated_class.default_output_activation = output_activation
+    return generated_class

@@ -29,6 +29,9 @@ Change Log:
 2025-12-14:
 - Changed module name from "Pytorch2LTspice" to "pytorch2ltspice"
 
+2026-01-04:
+- Added output_activation/output_mask support in generate_ltspice_subckt and export_model_to_ltspice.
+
 
 Notes:
 - No default input voltage sources are emitted.
@@ -55,6 +58,7 @@ Notes:
 import torch
 import torch.nn as nn
 import numpy as np
+from typing import List, Optional
 
 def extract_layers(model):
     """
@@ -140,7 +144,47 @@ def generate_dot_product_expression(input_nodes, weights, neuron_index):
     expr = "+".join(terms)
     return expr.upper()
 
-def generate_ltspice_subckt(layers_info, subckt_name="NETLISTSUBCKT", input_ports=None, output_ports=None):
+def _infer_output_count(layers_info):
+    count = None
+    for layer in layers_info:
+        if layer["type"] == "linear":
+            count = layer["W"].shape[0]
+        elif layer["type"] in ("rnncell", "grucell", "lstmcell"):
+            count = layer["hidden_size"]
+    return count or 0
+
+
+def _build_activation_expr(expr, spec):
+    if spec is None:
+        return expr
+    spec_str = str(spec).strip().lower()
+    if spec_str in ("", "identity"):
+        return expr
+    if spec_str == "sigmoid":
+        return f"(1/(1+EXP(-({expr}))))"
+    if spec_str == "tanh":
+        return f"(TANH({expr}))"
+    if spec_str == "relu":
+        return f"(IF(({expr})>0,({expr}),0))"
+    if spec_str.startswith("clamp(") and spec_str.endswith(")"):
+        inner = spec_str[len("clamp("):-1].strip()
+        pieces = [p.strip() for p in inner.split(",")]
+        if len(pieces) != 2:
+            raise ValueError("clamp expects clamp(min,max).")
+        min_v = float(pieces[0])
+        max_v = float(pieces[1])
+        return f"(IF(({expr})<({min_v}),({min_v}),IF(({expr})>({max_v}),({max_v}),({expr}))))"
+    raise ValueError(f"Unknown output activation: {spec}")
+
+
+def generate_ltspice_subckt(
+    layers_info,
+    subckt_name="NETLISTSUBCKT",
+    input_ports=None,
+    output_ports=None,
+    output_activation: Optional[List[str]] = None,
+    output_mask: Optional[List[bool]] = None,
+):
     """
     Generates an LTspice subcircuit netlist from the extracted layer information.
     For linear layers, creates behavioral sources that compute the dot product 
@@ -155,8 +199,33 @@ def generate_ltspice_subckt(layers_info, subckt_name="NETLISTSUBCKT", input_port
     that use a three-state LO/LATCH/HI sequence, capturing the previous outputs on LH*/LC* latch
     nodes during the LATCH phase and updating new values only when the machine reaches HI.
     No external SAMPLEHOLD elements are emitted.
+
+    output_activation: Optional list of per-output activation specs applied at the final outputs.
+      - None is allowed to disable output activation (default).
+      - Supported: identity, sigmoid, tanh, relu, clamp(min,max).
+      - Length must match the model output dimension.
+    output_mask: Optional list of booleans selecting which outputs are exposed.
+      - Length must match the model output dimension, and at least one True is required.
+      - When provided, header ports are reduced to the selected outputs.
+      - Examples:
+        output_activation = ["tanh", None, "clamp(-1,1)"]
+        output_mask = [True, False, True]
     """
     netlist_lines = []
+
+    full_output_count = _infer_output_count(layers_info)
+    if output_mask is not None:
+        if len(output_mask) != full_output_count:
+            raise ValueError(
+                f"Output mask length ({len(output_mask)}) does not match model output dimension ({full_output_count})."
+            )
+        if not any(output_mask):
+            raise ValueError("Output mask must contain at least one True.")
+    if output_activation is not None:
+        if len(output_activation) != full_output_count:
+            raise ValueError(
+                f"Output activation length ({len(output_activation)}) does not match model output dimension ({full_output_count})."
+            )
 
     # Analyze recurrent cells for multi-cell support
     cell_layers = [
@@ -166,6 +235,12 @@ def generate_ltspice_subckt(layers_info, subckt_name="NETLISTSUBCKT", input_port
     total_cells = len(cell_layers)
     # Use clearer flag name: any recurrent cell exists
     has_any_cell = (total_cells > 0)
+    last_linear_idx = None
+    for idx, layer in enumerate(layers_info):
+        if layer["type"] == "linear":
+            last_linear_idx = idx
+    enable_output_prune = (output_mask is not None and not has_any_cell and last_linear_idx is not None)
+    selected_indices = [i for i, m in enumerate(output_mask or []) if m]
     
     # Auto-generate input ports if not provided
     if input_ports is None:
@@ -212,7 +287,8 @@ def generate_ltspice_subckt(layers_info, subckt_name="NETLISTSUBCKT", input_port
     cell_layer_index = 0   # counts recurrent cells for unique naming
 
     # Process each layer
-    for layer in layers_info:
+    pruned_outputs = False
+    for layer_idx, layer in enumerate(layers_info):
         if layer["type"] == "linear":
             linear_layer_count += 1
             W = layer["W"]
@@ -229,7 +305,12 @@ def generate_ltspice_subckt(layers_info, subckt_name="NETLISTSUBCKT", input_port
             in_nodes = current_nodes[:in_dim]
             new_nodes = []
             netlist_lines.append(f"* LAYER {linear_layer_count}: LINEAR")
-            for j in range(out_dim):
+            if enable_output_prune and layer_idx == last_linear_idx:
+                iter_indices = selected_indices
+                pruned_outputs = True
+            else:
+                iter_indices = list(range(out_dim))
+            for j in iter_indices:
                 # Define unique internal node names.
                 node_name = f"L{linear_layer_count}_{j+1}".upper()
                 new_nodes.append(node_name)
@@ -493,9 +574,16 @@ def generate_ltspice_subckt(layers_info, subckt_name="NETLISTSUBCKT", input_port
     # Determine output ports and build header
     final_count = len(current_nodes)
     if output_ports is None:
-        output_ports = [f"NNOUT{i+1}" for i in range(final_count)]
-    out_count = len(output_ports)
-    header_ports = output_ports
+        output_ports = [f"NNOUT{i+1}" for i in range(full_output_count)]
+    if output_ports and len(output_ports) != full_output_count:
+        raise ValueError(
+            f"Output port count ({len(output_ports)}) does not match model output dimension ({full_output_count}). "
+            f"Pass a list of {full_output_count} names to output_ports."
+        )
+    if output_mask is not None:
+        header_ports = [output_ports[i] for i in selected_indices]
+    else:
+        header_ports = output_ports
     header = f".SUBCKT {subckt_name} " + " ".join(input_ports) + (" " + " ".join(header_ports) if header_ports else "")
     # Insert header at top of file
     netlist_lines.insert(0, header)
@@ -503,33 +591,66 @@ def generate_ltspice_subckt(layers_info, subckt_name="NETLISTSUBCKT", input_port
     # Connect the final internal node(s) to the external output port(s) using behavioral sources.
     if final_count == 0:
         netlist_lines.append("* No final nodes to connect")
-    elif final_count == 1 and out_count == 1:
-        final_node = current_nodes[0]
-        netlist_lines.append(f"* Connect final internal node {final_node} to external output {output_ports[0]}")
-        netlist_lines.append(f"B_OUT {output_ports[0]} 0 V=V({final_node})")
     else:
-        # Multi-output case: require the number of output ports to match the number of final nodes
-        if out_count != final_count:
-            raise ValueError(
-                f"Output port count ({out_count}) does not match model output dimension ({final_count}). "
-                f"Pass a list of {final_count} names to output_ports."
-            )
-        netlist_lines.append("* Connect final internal nodes to multiple external outputs")
-        for idx, (node, outp) in enumerate(zip(current_nodes, output_ports), start=1):
-            netlist_lines.append(f"B_OUT{idx} {outp} 0 V=V({node})")
+        if output_mask is not None:
+            if pruned_outputs:
+                selected_nodes = current_nodes
+            else:
+                selected_nodes = [current_nodes[i] for i in selected_indices]
+            selected_ports = [output_ports[i] for i in selected_indices]
+            selected_acts = [output_activation[i] for i in selected_indices] if output_activation is not None else None
+        else:
+            selected_nodes = current_nodes
+            selected_ports = output_ports
+            selected_acts = output_activation
+
+        if len(selected_nodes) == 1 and len(selected_ports) == 1:
+            final_node = selected_nodes[0]
+            netlist_lines.append(f"* Connect final internal node {final_node} to external output {selected_ports[0]}")
+            expr = f"V({final_node})"
+            if selected_acts:
+                expr = _build_activation_expr(expr, selected_acts[0])
+            netlist_lines.append(f"B_OUT {selected_ports[0]} 0 V={expr}".upper())
+        else:
+            netlist_lines.append("* Connect final internal nodes to multiple external outputs")
+            for idx, (node, outp) in enumerate(zip(selected_nodes, selected_ports), start=1):
+                expr = f"V({node})"
+                if selected_acts:
+                    expr = _build_activation_expr(expr, selected_acts[idx - 1])
+                netlist_lines.append(f"B_OUT{idx} {outp} 0 V={expr}".upper())
     # Add alias outputs for hidden state (HOUT*) if defined
     # States are internal and updated via the .machine; no alias B-sources are emitted.
     netlist_lines.append(f".ENDS {subckt_name}")
     return "\n".join(netlist_lines)
 
-def export_model_to_ltspice(model, filename="MODEL_SUBCKT.SP", subckt_name="NETLISTSUBCKT", input_ports=None, output_ports=None, verbose=True):
+def export_model_to_ltspice(
+    model,
+    filename="MODEL_SUBCKT.SP",
+    subckt_name="NETLISTSUBCKT",
+    input_ports=None,
+    output_ports=None,
+    output_activation: Optional[List[str]] = None,
+    output_mask: Optional[List[bool]] = None,
+    verbose=True,
+):
     """
     Extracts parameters from an nn.Sequential PyTorch model and exports an LTspice subcircuit
     netlist to a file. The file is written in ASCII encoding.
     - If output_ports is None, NNOUT* ports are auto-assigned; mismatch with model output size raises ValueError.
+    - output_activation applies optional per-output activation at the final outputs (see generate_ltspice_subckt).
+    - output_mask selects which outputs are exported while keeping the full output dimension checks.
+    - Examples:
+      output_activation=["tanh", None, "clamp(-1,1)"], output_mask=[True, False, True]
     """
     layers_info = extract_layers(model)
-    netlist = generate_ltspice_subckt(layers_info, subckt_name, input_ports, output_ports=output_ports)
+    netlist = generate_ltspice_subckt(
+        layers_info,
+        subckt_name,
+        input_ports,
+        output_ports=output_ports,
+        output_activation=output_activation,
+        output_mask=output_mask,
+    )
     with open(filename, "w", encoding="ascii") as f:
         f.write(netlist)
     if verbose:
