@@ -1,65 +1,35 @@
 # pytorch2ltspice
 
 [![PyPI](https://img.shields.io/pypi/v/pytorch2ltspice.svg)](https://pypi.org/project/pytorch2ltspice/)
-[![License](https://img.shields.io/github/license/kosokno/pytorch2ltspice.svg)](./LICENSE)
+[![License](https://img.shields.io/github/license/kosokno/pytorch2ltspice.svg)](https://github.com/kosokno/pytorch2ltspice/blob/main/LICENSE)
 [![Python](https://img.shields.io/pypi/pyversions/pytorch2ltspice.svg)](https://pypi.org/project/pytorch2ltspice/)
 
-**pytorch2ltspice** converts PyTorch neural network models into LTspice-compatible subcircuits (`.subckt`).
-By combining it with [LTspicePowerSim](https://github.com/kosokno/LTspicePowerSim), users can implement AI-based controllers directly in power electronics circuits such as DC-DC converters, inverters, and motor drivers.  
-This repository also provides example code where a neural network controls the PWM of a BUCK regulator, trained with behavior imitation and PPO.
+`pytorch2ltspice` converts PyTorch `nn.Sequential` models into LTspice-compatible subcircuits (`.subckt`).
+It is intended for workflows where a controller is trained in PyTorch and then embedded directly into LTspice simulations for power electronics, control, and reinforcement learning experiments.
 
+By combining it with [LTspicePowerSim](https://github.com/kosokno/LTspicePowerSim), you can evaluate neural-network controllers inside converter, inverter, and motor-drive simulations.
 
 ![overview](https://raw.githubusercontent.com/kosokno/pytorch2ltspice/main/img/pytorch2ltspice.png)
 
----
+## Features
 
-## 📌 Features
+- Export PyTorch `nn.Sequential` models as LTspice `.subckt` netlists.
+- Support `nn.Linear`, `nn.ReLU`, `nn.Sigmoid`, `nn.Tanh`, `nn.RNNCell`, `nn.GRUCell`, and `nn.LSTMCell`.
+- Generate behavioral-source (`B`) based netlists for feed-forward layers.
+- Generate recurrent-cell implementations using LTspice `.machine` blocks with an auto-added `CLK` pin.
+- Support final-output postprocessing via `output_activation` and selective output exposure via `output_mask`.
+- Include helper utilities under `pytorch2ltspice.utils` for signal generation, model scaffolding, and sampling.
+- Provide end-to-end example projects for buck-converter control with imitation learning and PPO.
 
-- Converts PyTorch `nn.Sequential` models to LTspice-compatible `.subckt` format
-- Supported layers:
-  - Linear:
-    - `nn.Linear`
-  - Activations:
-    - `nn.ReLU`
-    - `nn.Sigmoid`
-    - `nn.Tanh`
-  - Cells:
-    - `nn.RNNCell`
-    - `nn.GRUCell`
-    - `nn.LSTMCell`
-- Outputs a netlist using behavioral voltage sources (`B` elements)
-- Recurrent cells are implemented with `.machine` blocks (LO/LATCH/HI states, CLK pin auto-added)
-- Auto-generates LTspice node names (`NNIN1`, `NNIN2`, ..., `NNOUT1`, ...)
-- Easy integration into LTspice testbenches
-- Utilities for signal generation, model scaffolding, and sampling (`siggen`, `modelgen`, `sampling`)
-- Several example models are included:
-  - MLP: `Linear → ReLU → Linear → ReLU → Linear → Sigmoid`
-  - GRUCell: `GRUCell → Linear → Tanh`
-  - LSTMCell: `LSTMCell → Linear → Tanh`
-  - RNNCell: `RNNCell → Linear → Tanh`
-  - Hybrid: `Linear → ReLU → (GRUCell/LSTMCell) → Linear → Tanh`
-  - Multi-cell LSTM: stacked `LSTMCell` layers
+## Installation
 
----
-## 🧠 Motivation
-
-Neural networks trained in Python (with PyTorch) can now be exported and tested directly in LTspice circuit simulations.  
-This allows for:
-- Closed-loop simulation with NN controllers 
-- Verification of inference logic inside switching power supplies
-- Observation of behavior under nonlinear and dynamic conditions
-
----
-
-## 🚀 Installation
-
-### Option A: Install from PyPI (recommended)
+Install from PyPI:
 
 ```bash
 pip install pytorch2ltspice
 ```
 
-### Option B: Install from source (GitHub)
+Install from source:
 
 ```bash
 git clone https://github.com/kosokno/pytorch2ltspice.git
@@ -67,11 +37,9 @@ cd pytorch2ltspice
 pip install -e .
 ```
 
----
+## Quick Start
 
-## ⚡ Quick Start
-
-### 1. Define a model in PyTorch
+Define a model in PyTorch:
 
 ```python
 import torch.nn as nn
@@ -81,12 +49,12 @@ model = nn.Sequential(
     nn.ReLU(),
     nn.Linear(32, 16),
     nn.ReLU(),
-    nn.Linear(16, 1)
+    nn.Linear(16, 1),
 )
 model.eval()
 ```
 
-### 2. Export as LTspice `.subckt` file
+Export it as an LTspice subcircuit:
 
 ```python
 from pytorch2ltspice import export_model_to_ltspice
@@ -94,64 +62,37 @@ from pytorch2ltspice import export_model_to_ltspice
 export_model_to_ltspice(
     model,
     filename="TEST_MODEL_SUBCKT.SP",
-    subckt_name="TESTACTORSUBCKT"
+    subckt_name="TESTACTORSUBCKT",
+    output_activation=["tanh"],
 )
 ```
-### 3. Include it in LTspice
 
-- Add the following directive in LTspice:
-  - `.include TEST_MODEL_SUBCKT.SP`
-- Wire `NNIN*` pins to your signals and read `NNOUT*` as the inference output.
+Include the generated file in LTspice:
 
----
+- Add `.include TEST_MODEL_SUBCKT.SP` to your schematic.
+- Drive the `NNIN*` pins from your circuit.
+- Read the inference result from `NNOUT*`.
 
-## 🧰 Utilities
+## Utilities
 
 Helper utilities are available under `pytorch2ltspice.utils`:
 
-- `siggen`: signal generators for LTspice testbenches
-- `modelgen`: minimal model scaffolding for experiments
-- `sampling`: simple data sampling helpers
+- `siggen`: generate LTspice signal-source schematics and symbols.
+- `modelgen`: generate a PyTorch module class from `nn.Sequential`.
+- `sampling`: sample signals on a clock for analysis and data preparation.
 
-Note: example code now uses these utilities. Developer tools moved from `tools/modelgen` to `tools/utils_test`.
+## Examples
 
----
+Example projects are available under [`examples/`](https://github.com/kosokno/pytorch2ltspice/tree/main/examples):
 
-## 📂 Output Example
+- `BUCK_VM_BI`: behavior-imitation controller for a voltage-mode buck converter.
+- `BUCK_VM_PPO`: PPO-based controller for a voltage-mode buck converter.
+- `BUCK_VM_GRU8x1`: recurrent controller examples using `GRUCell`.
 
-The resulting LTspice subcircuit will look like:
+## Related Projects
 
-```
-.SUBCKT TESTACTORSUBCKT NNIN1 NNIN2 ... NNIN20 NNOUT1
-* LAYER 1: LINEAR
-B1_1 L1_1 0 V=V(NNIN1)*(-0.179081)+V(NNIN2)*(-0.068428)+...
-...
-* ACTIVATION LAYER 1: RELU
-B_ACT1_1 L_ACT1_1 0 V=(IF(V(L1_1)>0,V(L1_1),0))
-...
-B_OUT NNOUT1 0 V=V(L_ACT2_1)
-.ENDS TESTACTORSUBCKT
-```
+- [LTspicePowerSim](https://github.com/kosokno/LTspicePowerSim)
 
----
+## License
 
-## ✨ Training Example
-
-### NN Controlled Voltage Mode Buck
-![Voltage Mode Buck controled with Nerural Network](https://raw.githubusercontent.com/kosokno/pytorch2ltspice/main/img/NN_BUCK_VM.png)
-
-
-
----
-
-## 📄 License
-
-MIT License
-
----
-
-## 🧩 Related Projects
-
-- 🔗 [LTspicePowerSim](https://github.com/kosokno/LTspicePowerSim.git):  
-  A Simulink-like power electronics simulation environment built on LTspice,
-
+MIT

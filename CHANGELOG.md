@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 0.1.4 - 2026.03.21
+
+- Fixed `build_model_from_sequential` so recurrent `forward()` paths do not apply `output_activation` twice.
+- Added regression coverage for generated RNNCell, GRUCell, and LSTMCell models with output activation.
+
 ## 0.1.3 - 2026.01.04
 
 - Added output_activation/output_mask support in generate_ltspice_subckt and export_model_to_ltspice.

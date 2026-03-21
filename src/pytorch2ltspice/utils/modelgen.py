@@ -13,6 +13,9 @@ Change Log:
 
 2026-01-04:
 - Added output_activation support in build_model_from_sequential.
+
+2026-03-21:
+- Avoid double-applying output activation in RNN/GRU/LSTM forward path.
 """
 
 from __future__ import annotations
@@ -256,7 +259,7 @@ def _generate_model_code_from_sequential(name: str, seq: nn.Sequential) -> tuple
                 # RNN path
                 if x.dim() == 1:
                     out, _ = self.step(x.unsqueeze(0), state)
-                    return self._apply_output_activation(out.squeeze(0))
+                    return out.squeeze(0)
 
                 # (T, D): step over T, batch=1
                 if x.dim() == 2:
@@ -267,7 +270,7 @@ def _generate_model_code_from_sequential(name: str, seq: nn.Sequential) -> tuple
                         out, state_in = self.step(step_input, state_in)
                         outputs.append(out)
                     y = torch.cat(outputs, dim=0)
-                    return self._apply_output_activation(y)
+                    return y
 
                 # (B, T, D)
                 if x.dim() == 3:
@@ -278,7 +281,7 @@ def _generate_model_code_from_sequential(name: str, seq: nn.Sequential) -> tuple
                         out, state_in = self.step(step_input, state_in)
                         outputs.append(out.unsqueeze(1))
                     y = torch.cat(outputs, dim=1)
-                    return self._apply_output_activation(y)
+                    return y
 
                 raise ValueError("RNN forward expects tensors with rank 1, 2, or 3.")
         """
